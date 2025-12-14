@@ -1,0 +1,8 @@
+{
+  "name": "book-pile",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node generate-covers.js"
+  }
+}
