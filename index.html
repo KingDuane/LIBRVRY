@@ -73,410 +73,468 @@
       -webkit-user-drag:none;
       user-drag:none;
     }
+
+    #outgoing{
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+  }
   </style>
 </head>
 
 <body>
-  <div class="stage" id="stage"></div>
+  <div class="stage" id="stage">
+  <div id="outgoing"></div>
+  </div>
 
   <script>
     (() => {
-      const stage = document.getElementById("stage");
+  const stage = document.getElementById("stage");
 
-      // ---------- Tunables ----------
-      const MAX_ONSCREEN = 14;
+  // ---------- Tunables ----------
+  const MAX_ONSCREEN = 14;
 
-      // Autoplay energy (you set this to 700)
-      const AUTOPLAY_INTERVAL = 700;
+  // Default autoplay speed (ms). Can be overridden by URL params.
+  const DEFAULT_AUTOPLAY_INTERVAL = 700;
 
-      // Pause autoplay after any user input for this long:
-      const RESUME_AFTER_MS = 2200;
+  // Pause autoplay after any user input for this long:
+  const RESUME_AFTER_MS = 2200;
 
-      const OFFSCREEN = 1100;         // px
-      const SWIPE_DISTANCE = 120;      // px
-      const SWIPE_VELOCITY = 650;      // px/s
+  const OFFSCREEN = 1100;         // px
+  const SWIPE_DISTANCE = 120;      // px
+  const SWIPE_VELOCITY = 650;      // px/s
 
-      // Responsive width limits (px)
-      const MIN_W = 190;
-      const MAX_W = 420;
+  // Responsive width limits (px)
+  const MIN_W = 190;
+  const MAX_W = 420;
 
-      // Clamp each image to 75% of its native pixel width (never upscale)
-      const SCALE_NATIVE = 0.75;
+  // Clamp each image to 75% of its native pixel width (never upscale)
+  const SCALE_NATIVE = 0.75;
 
-      // ---------- URL params ----------
-      const params = new URLSearchParams(location.search);
-      const autoplayParam = (params.get("autoplay") || "").toLowerCase();
-      const AUTOPLAY =
-        !(autoplayParam === "0" || autoplayParam === "false" || autoplayParam === "off" || autoplayParam === "no");
+  // ---------- URL params ----------
+  const params = new URLSearchParams(location.search);
 
-      // ---------- State ----------
-      let covers = [];
-      let idx = 0;
-      let autoplayTimer = null;
-      let userInteracting = false;
-      let lastInteractionAt = 0;
+  // autoplay on/off:
+  // ?autoplay=off|false|0|no  => disabled
+  // ?autoplay=on|true|1|yes   => enabled
+  // If autoplay is numeric, it is treated as an interval override (ms).
+  const autoplayRaw = (params.get("autoplay") || "").trim().toLowerCase();
 
-      // ---------- Helpers ----------
-      function noteInteraction(){
-        lastInteractionAt = performance.now();
+  const AUTOPLAY =
+    !(autoplayRaw === "0" || autoplayRaw === "false" || autoplayRaw === "off" || autoplayRaw === "no");
+
+  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+  // autoplay speed:
+  // ?speed=700               => interval in ms
+  // ?autoplay=700            => also accepted (numeric)
+  // Clamped to [120..5000]ms
+  function getAutoplayInterval(){
+    const speedRaw = (params.get("speed") || "").trim();
+    let raw = speedRaw;
+
+    // If no ?speed, allow numeric ?autoplay
+    if (!raw && autoplayRaw && !Number.isNaN(parseInt(autoplayRaw, 10))) {
+      raw = autoplayRaw;
+    }
+
+    if (!raw) return DEFAULT_AUTOPLAY_INTERVAL;
+
+    const ms = parseInt(raw, 10);
+    if (Number.isNaN(ms)) return DEFAULT_AUTOPLAY_INTERVAL;
+
+    return clamp(ms, 120, 5000);
+  }
+
+  const AUTOPLAY_INTERVAL = getAutoplayInterval();
+
+  // ---------- State ----------
+  let covers = [];
+  let idx = 0;
+  let autoplayTimer = null;
+  let userInteracting = false;
+  let lastInteractionAt = performance.now(); // initializes quiet window nicely
+
+  // ---------- Helpers ----------
+  function noteInteraction(){
+    lastInteractionAt = performance.now();
+  }
+
+  function hashToUnitFloat(str){
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0) / 4294967296;
+  }
+
+  function baseRotationFor(src, maxDeg = 12){
+    const u = hashToUnitFloat(src);
+    return (u * 2 - 1) * maxDeg;
+  }
+
+  function randomEntryVector(dir = 0){
+    // dir: -1 (from left), +1 (from right), 0 (any angle)
+    if (dir === -1) return { x: -OFFSCREEN, y: (Math.random() * 600 - 300) };
+    if (dir ===  1) return { x:  OFFSCREEN, y: (Math.random() * 600 - 300) };
+    const angle = Math.random() * Math.PI * 2;
+    return { x: Math.cos(angle) * OFFSCREEN, y: Math.sin(angle) * OFFSCREEN };
+  }
+
+  function getTargetWidthPx(){
+    const w = Math.floor(window.innerWidth * 0.82);
+    return clamp(w, MIN_W, MAX_W);
+  }
+
+  function setGlobalWidthVar(){
+    const w = getTargetWidthPx();
+    document.documentElement.style.setProperty("--book-width", w + "px");
+    return w;
+  }
+
+  function nextCover(){
+    if (covers.length === 0) return null;
+    const src = covers[idx % covers.length];
+    idx++;
+    return src;
+  }
+
+  function setTransform(el, x, y, rotDeg, scale, centerY){
+    el.style.transform =
+      `translate(-50%, ${centerY}px) translate(${x}px, ${y}px) rotate(${rotDeg}deg) scale(${scale})`;
+  }
+
+  function computeCenterY(ar, widthPx){
+    return ar ? (-(widthPx * ar) / 2) : 0;
+  }
+
+  function ensureOutgoingLayer(){
+    let outgoing = document.getElementById("outgoing");
+    if (!outgoing) {
+      outgoing = document.createElement("div");
+      outgoing.id = "outgoing";
+      outgoing.style.position = "absolute";
+      outgoing.style.inset = "0";
+      outgoing.style.pointerEvents = "none";
+      outgoing.style.zIndex = "9999";
+      stage.appendChild(outgoing);
+    }
+    return outgoing;
+  }
+
+  // ---------- Core ----------
+  async function loadCovers(){
+    const res = await fetch("/covers.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`GET /covers.json failed: ${res.status}`);
+    const list = await res.json();
+    if (!Array.isArray(list) || list.length === 0) throw new Error("No covers found.");
+    covers = list;
+
+    setGlobalWidthVar();
+
+    // seed pile
+    const seed = Math.min(6, covers.length);
+    for (let i = 0; i < seed; i++) addBook({ animateIn: false });
+
+    if (AUTOPLAY) startAutoplay();
+  }
+
+  function addBook({ animateIn = true, dir = 0 } = {}){
+    const src = nextCover();
+    if (!src) return;
+
+    const book = document.createElement("div");
+    book.className = "book";
+    book.dataset.src = src;
+
+    const rot = baseRotationFor(src, 12) + (Math.random() * 6 - 3);
+    const scale = 1;
+
+    const driftX = (Math.random() * 18 - 9);
+    const driftY = (Math.random() * 10 - 5);
+
+    book.dataset.rot = String(rot);
+    book.dataset.scale = String(scale);
+    book.dataset.x = String(driftX);
+    book.dataset.y = String(driftY);
+
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "";
+    img.draggable = false;
+
+    book.appendChild(img);
+    stage.appendChild(book);
+
+    while (stage.children.length > MAX_ONSCREEN) {
+      stage.removeChild(stage.firstElementChild);
+    }
+
+    refreshInteractivity();
+
+    const entry = randomEntryVector(dir);
+
+    const onLoaded = () => {
+      const natW = img.naturalWidth || 0;
+      const natH = img.naturalHeight || 0;
+      const ar = (natW && natH) ? (natH / natW) : 0;
+
+      book.dataset.nw = String(natW);
+      book.dataset.ar = String(ar);
+
+      const targetW = getTargetWidthPx();
+      const maxNativeW = natW ? (natW * SCALE_NATIVE) : targetW;
+      const clampedW = Math.min(targetW, maxNativeW);
+
+      // widths
+      document.documentElement.style.setProperty("--book-width", targetW + "px");
+      book.style.setProperty("--w", clampedW + "px");
+
+      const centerY = computeCenterY(ar, clampedW);
+      book.dataset.centerY = String(centerY);
+
+      // Start offscreen
+      book.style.transition = "none";
+      setTransform(book, entry.x + driftX, entry.y + driftY, rot, scale, centerY);
+
+      // Force reflow for Chrome/Safari consistency
+      void book.offsetWidth;
+
+      if (!animateIn) {
+        setTransform(book, driftX, driftY, rot, scale, centerY);
+        return;
       }
 
-      function hashToUnitFloat(str){
-        let h = 2166136261;
-        for (let i = 0; i < str.length; i++){
-          h ^= str.charCodeAt(i);
-          h = Math.imul(h, 16777619);
-        }
-        return (h >>> 0) / 4294967296;
+      book.style.transition = "transform 620ms cubic-bezier(.2,.85,.2,1)";
+      setTransform(book, driftX, driftY, rot, scale, centerY);
+    };
+
+    img.addEventListener("load", onLoaded, { once: true });
+    img.addEventListener("error", () => book.remove(), { once: true });
+    if (img.complete) onLoaded();
+  }
+
+  // Non-blocking dismiss: move top to outgoing layer, immediately reveal next top.
+  function dismissTop(dir = 1, duration = 260){
+    const books = stage.querySelectorAll(":scope > .book");
+    const top = books[books.length - 1];
+    if (!top) return;
+
+    noteInteraction();
+
+    const centerY = parseFloat(top.dataset.centerY || "0");
+    const rot = parseFloat(top.dataset.rot || "0");
+    const scale = parseFloat(top.dataset.scale || "1");
+    const currX = parseFloat(top.dataset.x || "0");
+    const currY = parseFloat(top.dataset.y || "0");
+
+    const outgoing = ensureOutgoingLayer();
+
+    // Disable interaction on outgoing card
+    top.onpointerdown = top.onpointermove = top.onpointerup = top.onpointercancel = null;
+    top.classList.remove("dragging");
+    top.style.pointerEvents = "none";
+    top.style.cursor = "default";
+
+    // Move to outgoing layer
+    outgoing.appendChild(top);
+
+    // Immediately rebind interactivity to the new top in stage
+    refreshInteractivity();
+
+    // Ensure start pose after reparent
+    top.style.transition = "none";
+    setTransform(top, currX, currY, rot, scale, centerY);
+
+    // Force layout so the browser commits the start transform
+    void top.offsetWidth;
+
+    const targetX = currX + dir * OFFSCREEN;
+    const targetY = currY + (Math.random() * 140 - 70);
+
+    // Animate exit on next frame
+    requestAnimationFrame(() => {
+      top.style.transition = `transform ${duration}ms cubic-bezier(.2,.9,.2,1)`;
+      setTransform(top, targetX, targetY, rot, scale, centerY);
+    });
+
+    // Cleanup (transitionend + fallback)
+    const cleanup = () => top.remove();
+    top.addEventListener("transitionend", cleanup, { once: true });
+    setTimeout(cleanup, duration + 180);
+  }
+
+  function startAutoplay(){
+    clearInterval(autoplayTimer);
+    autoplayTimer = setInterval(() => {
+      const now = performance.now();
+
+      // Pause autoplay briefly after user input
+      if (userInteracting) return;
+      if (now - lastInteractionAt < RESUME_AFTER_MS) return;
+
+      addBook({ animateIn: true, dir: 0 });
+    }, AUTOPLAY_INTERVAL);
+  }
+
+  // ---------- Swipe / Drag on top book ----------
+  function refreshInteractivity(){
+    const books = [...stage.querySelectorAll(":scope > .book")];
+    for (const b of books) {
+      b.classList.remove("dragging");
+      b.onpointerdown = null;
+      b.onpointermove = null;
+      b.onpointerup = null;
+      b.onpointercancel = null;
+    }
+
+    const top = books[books.length - 1];
+    if (!top) return;
+    attachDrag(top);
+  }
+
+  function attachDrag(book){
+    let dragging = false;
+    let startX = 0;
+    let dx = 0;
+
+    let lastX = 0;
+    let lastT = 0;
+    let vx = 0;
+
+    book.onpointerdown = (e) => {
+      noteInteraction();
+
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+
+      userInteracting = true;
+      dragging = true;
+      dx = 0;
+
+      book.classList.add("dragging");
+      book.style.transition = "none";
+
+      startX = e.clientX;
+      lastX = startX;
+      lastT = performance.now();
+      vx = 0;
+
+      try { book.setPointerCapture(e.pointerId); } catch {}
+
+      if (e.cancelable) e.preventDefault();
+    };
+
+    book.onpointermove = (e) => {
+      if (!dragging) return;
+
+      const xNow = e.clientX;
+      dx = xNow - startX;
+
+      const now = performance.now();
+      const dt = Math.max(1, now - lastT);
+      const instV = ((xNow - lastX) / dt) * 1000;
+      vx = 0.8 * vx + 0.2 * instV;
+
+      lastX = xNow;
+      lastT = now;
+
+      const baseX = parseFloat(book.dataset.x || "0");
+      const baseY = parseFloat(book.dataset.y || "0");
+      const rot = parseFloat(book.dataset.rot || "0");
+      const scale = parseFloat(book.dataset.scale || "1");
+      const centerY = parseFloat(book.dataset.centerY || "0");
+
+      const dragY = clamp(Math.abs(dx) * 0.05, 0, 24);
+      setTransform(book, baseX + dx, baseY + dragY, rot, scale, centerY);
+
+      noteInteraction();
+      if (e.cancelable) e.preventDefault();
+    };
+
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+
+      book.classList.remove("dragging");
+      noteInteraction();
+
+      const shouldSwipe =
+        Math.abs(dx) > SWIPE_DISTANCE || Math.abs(vx) > SWIPE_VELOCITY;
+
+      if (!shouldSwipe) {
+        const baseX = parseFloat(book.dataset.x || "0");
+        const baseY = parseFloat(book.dataset.y || "0");
+        const rot = parseFloat(book.dataset.rot || "0");
+        const scale = parseFloat(book.dataset.scale || "1");
+        const centerY = parseFloat(book.dataset.centerY || "0");
+
+        book.style.transition = "transform 300ms cubic-bezier(.2,.9,.2,1)";
+        setTransform(book, baseX, baseY, rot, scale, centerY);
+
+        userInteracting = false;
+        return;
       }
 
-      function baseRotationFor(src, maxDeg = 12){
-        const u = hashToUnitFloat(src);
-        return (u * 2 - 1) * maxDeg;
+      dismissTop(dx > 0 ? 1 : -1, 260);
+      setTimeout(() => { userInteracting = false; }, 250);
+    };
+
+    book.onpointerup = end;
+    book.onpointercancel = end;
+  }
+
+  // ---------- Keyboard navigation ----------
+  function onKeyDown(e){
+    if (e.key === "ArrowRight") {
+      noteInteraction();
+      addBook({ animateIn: true, dir: 1 });
+    } else if (e.key === "ArrowLeft") {
+      noteInteraction();
+      dismissTop(-1, 260);
+    }
+  }
+
+  // ---------- Responsive recenter + no-upscale recompute ----------
+  let resizeRAF = null;
+  function onResize(){
+    cancelAnimationFrame(resizeRAF);
+    resizeRAF = requestAnimationFrame(() => {
+      const targetW = setGlobalWidthVar();
+
+      const books = [...stage.querySelectorAll(":scope > .book")];
+      for (const b of books){
+        const natW = parseFloat(b.dataset.nw || "0") || targetW;
+        const ar = parseFloat(b.dataset.ar || "0");
+
+        const maxNativeW = natW * SCALE_NATIVE;
+        const clampedW = Math.min(targetW, maxNativeW);
+
+        b.style.setProperty("--w", clampedW + "px");
+
+        const centerY = computeCenterY(ar, clampedW);
+        b.dataset.centerY = String(centerY);
+
+        const x = parseFloat(b.dataset.x || "0");
+        const y = parseFloat(b.dataset.y || "0");
+        const rot = parseFloat(b.dataset.rot || "0");
+        const scale = parseFloat(b.dataset.scale || "1");
+
+        b.style.transition = "none";
+        setTransform(b, x, y, rot, scale, centerY);
       }
-
-      function randomEntryVector(dir = 0){
-        // dir: -1 (from left), +1 (from right), 0 (any angle)
-        if (dir === -1) return { x: -OFFSCREEN, y: (Math.random() * 600 - 300) };
-        if (dir ===  1) return { x:  OFFSCREEN, y: (Math.random() * 600 - 300) };
-        const angle = Math.random() * Math.PI * 2;
-        return { x: Math.cos(angle) * OFFSCREEN, y: Math.sin(angle) * OFFSCREEN };
-      }
-
-      function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-
-      function getTargetWidthPx(){
-        const w = Math.floor(window.innerWidth * 0.82);
-        return clamp(w, MIN_W, MAX_W);
-      }
-
-      function setGlobalWidthVar(){
-        const w = getTargetWidthPx();
-        document.documentElement.style.setProperty("--book-width", w + "px");
-        return w;
-      }
-
-      function nextCover(){
-        if (covers.length === 0) return null;
-        const src = covers[idx % covers.length];
-        idx++;
-        return src;
-      }
-
-      function setTransform(el, x, y, rotDeg, scale, centerY){
-        el.style.transform =
-          `translate(-50%, ${centerY}px) translate(${x}px, ${y}px) rotate(${rotDeg}deg) scale(${scale})`;
-      }
-
-      function computeCenterY(ar, widthPx){
-        return ar ? (-(widthPx * ar) / 2) : 0;
-      }
-
-      // ---------- Core ----------
-      async function loadCovers(){
-        const res = await fetch("/covers.json", { cache: "no-store" });
-        if (!res.ok) throw new Error(`GET /covers.json failed: ${res.status}`);
-        const list = await res.json();
-        if (!Array.isArray(list) || list.length === 0) throw new Error("No covers found.");
-        covers = list;
-
-        setGlobalWidthVar();
-
-        // seed pile
-        const seed = Math.min(6, covers.length);
-        for (let i = 0; i < seed; i++) addBook({ animateIn: false });
-
-        if (AUTOPLAY) startAutoplay();
-      }
-
-      function addBook({ animateIn = true, dir = 0 } = {}){
-        const src = nextCover();
-        if (!src) return;
-
-        const book = document.createElement("div");
-        book.className = "book";
-        book.dataset.src = src;
-
-        const rot = baseRotationFor(src, 12) + (Math.random() * 6 - 3);
-        const scale = 1;
-
-        const driftX = (Math.random() * 18 - 9);
-        const driftY = (Math.random() * 10 - 5);
-
-        book.dataset.rot = String(rot);
-        book.dataset.scale = String(scale);
-        book.dataset.x = String(driftX);
-        book.dataset.y = String(driftY);
-
-        const img = document.createElement("img");
-        img.src = src;
-        img.alt = "";
-        img.draggable = false;
-
-        book.appendChild(img);
-        stage.appendChild(book);
-
-        while (stage.children.length > MAX_ONSCREEN) {
-          stage.removeChild(stage.firstElementChild);
-        }
-
-        refreshInteractivity();
-
-        const entry = randomEntryVector(dir);
-
-        const onLoaded = () => {
-          const natW = img.naturalWidth || 0;
-          const natH = img.naturalHeight || 0;
-          const ar = (natW && natH) ? (natH / natW) : 0;
-
-          book.dataset.nw = String(natW);
-          book.dataset.ar = String(ar);
-
-          const targetW = getTargetWidthPx();
-          const maxNativeW = natW ? (natW * SCALE_NATIVE) : targetW;
-          const clampedW = Math.min(targetW, maxNativeW);
-
-          // widths
-          document.documentElement.style.setProperty("--book-width", targetW + "px");
-          book.style.setProperty("--w", clampedW + "px");
-
-          const centerY = computeCenterY(ar, clampedW);
-          book.dataset.centerY = String(centerY);
-
-          // Start offscreen
-          book.style.transition = "none";
-          setTransform(book, entry.x + driftX, entry.y + driftY, rot, scale, centerY);
-
-          // Force reflow for Chrome/Safari consistency
-          void book.offsetWidth;
-
-          if (!animateIn) {
-            setTransform(book, driftX, driftY, rot, scale, centerY);
-            return;
-          }
-
-          book.style.transition = "transform 620ms cubic-bezier(.2,.85,.2,1)";
-          setTransform(book, driftX, driftY, rot, scale, centerY);
-        };
-
-        img.addEventListener("load", onLoaded, { once: true });
-        img.addEventListener("error", () => book.remove(), { once: true });
-        if (img.complete) onLoaded();
-      }
-
-      // IMPORTANT: robust dismissal — transitionend OR fallback timer
-      function dismissTop(dir = 1){
-        const top = stage.lastElementChild;
-        if (!top || !top.classList.contains("book")) return;
-
-        noteInteraction();
-
-        const centerY = parseFloat(top.dataset.centerY || "0");
-        const rot = parseFloat(top.dataset.rot || "0");
-        const scale = parseFloat(top.dataset.scale || "1");
-        const currX = parseFloat(top.dataset.x || "0");
-        const currY = parseFloat(top.dataset.y || "0");
-
-        const targetX = currX + dir * OFFSCREEN;
-        const targetY = currY + (Math.random() * 200 - 100);
-
-        let done = false;
-        const finalize = () => {
-          if (done) return;
-          done = true;
-          top.remove();
-          refreshInteractivity();
-        };
-
-        top.style.transition = "transform 420ms cubic-bezier(.2,.9,.2,1)";
-        setTransform(top, targetX, targetY, rot, scale, centerY);
-
-        // transitionend (best case)
-        const onEnd = (e) => {
-          if (e.propertyName !== "transform") return;
-          top.removeEventListener("transitionend", onEnd);
-          finalize();
-        };
-        top.addEventListener("transitionend", onEnd);
-
-        // fallback (iOS Safari sometimes drops transitionend)
-        setTimeout(() => {
-          top.removeEventListener("transitionend", onEnd);
-          finalize();
-        }, 320);
-      }
-
-      function startAutoplay(){
-        clearInterval(autoplayTimer);
-        autoplayTimer = setInterval(() => {
-          const now = performance.now();
-
-          // Pause autoplay briefly after user input
-          if (userInteracting) return;
-          if (now - lastInteractionAt < RESUME_AFTER_MS) return;
-
-          addBook({ animateIn: true, dir: 0 });
-        }, AUTOPLAY_INTERVAL);
-      }
-
-      // ---------- Swipe / Drag on top book ----------
-      function refreshInteractivity(){
-        const books = [...stage.querySelectorAll(".book")];
-        for (const b of books) {
-          b.classList.remove("dragging");
-          b.onpointerdown = null;
-          b.onpointermove = null;
-          b.onpointerup = null;
-          b.onpointercancel = null;
-        }
-
-        const top = stage.lastElementChild;
-        if (!top || !top.classList.contains("book")) return;
-        attachDrag(top);
-      }
-
-      function attachDrag(book){
-        let dragging = false;
-        let startX = 0;
-        let dx = 0;
-
-        let lastX = 0;
-        let lastT = 0;
-        let vx = 0;
-
-        book.onpointerdown = (e) => {
-          // Always treat as interaction (also helps pause autoplay)
-          noteInteraction();
-
-          if (e.pointerType === "mouse" && e.button !== 0) return;
-
-          userInteracting = true;
-          dragging = true;
-          dx = 0;
-
-          book.classList.add("dragging");
-          book.style.transition = "none";
-
-          startX = e.clientX;
-          lastX = startX;
-          lastT = performance.now();
-          vx = 0;
-
-          try { book.setPointerCapture(e.pointerId); } catch {}
-
-          // On iOS, this helps prevent weird gesture conflicts:
-          if (e.cancelable) e.preventDefault();
-        };
-
-        book.onpointermove = (e) => {
-          if (!dragging) return;
-
-          const xNow = e.clientX;
-          dx = xNow - startX;
-
-          const now = performance.now();
-          const dt = Math.max(1, now - lastT);
-          const instV = ((xNow - lastX) / dt) * 1000;
-          vx = 0.8 * vx + 0.2 * instV;
-
-          lastX = xNow;
-          lastT = now;
-
-          const baseX = parseFloat(book.dataset.x || "0");
-          const baseY = parseFloat(book.dataset.y || "0");
-          const rot = parseFloat(book.dataset.rot || "0");
-          const scale = parseFloat(book.dataset.scale || "1");
-          const centerY = parseFloat(book.dataset.centerY || "0");
-
-          const dragY = clamp(Math.abs(dx) * 0.05, 0, 24);
-          setTransform(book, baseX + dx, baseY + dragY, rot, scale, centerY);
-
-          noteInteraction();
-          if (e.cancelable) e.preventDefault();
-        };
-
-        const end = () => {
-          if (!dragging) return;
-          dragging = false;
-
-          book.classList.remove("dragging");
-          noteInteraction();
-
-          const shouldSwipe =
-            Math.abs(dx) > SWIPE_DISTANCE || Math.abs(vx) > SWIPE_VELOCITY;
-
-          if (!shouldSwipe) {
-            const baseX = parseFloat(book.dataset.x || "0");
-            const baseY = parseFloat(book.dataset.y || "0");
-            const rot = parseFloat(book.dataset.rot || "0");
-            const scale = parseFloat(book.dataset.scale || "1");
-            const centerY = parseFloat(book.dataset.centerY || "0");
-
-            book.style.transition = "transform 300ms cubic-bezier(.2,.9,.2,1)";
-            setTransform(book, baseX, baseY, rot, scale, centerY);
-
-            userInteracting = false;
-            return;
-          }
-
-          dismissTop(dx > 0 ? 1 : -1);
-          setTimeout(() => { userInteracting = false; }, 250);
-        };
-
-        book.onpointerup = end;
-        book.onpointercancel = end;
-      }
-
-      // ---------- Keyboard navigation ----------
-      function onKeyDown(e){
-        if (e.key === "ArrowRight") {
-          noteInteraction();
-          addBook({ animateIn: true, dir: 1 });
-        } else if (e.key === "ArrowLeft") {
-          noteInteraction();
-          dismissTop(-1);
-        }
-      }
-
-      // ---------- Responsive recenter + no-upscale recompute ----------
-      let resizeRAF = null;
-      function onResize(){
-        cancelAnimationFrame(resizeRAF);
-        resizeRAF = requestAnimationFrame(() => {
-          const targetW = setGlobalWidthVar();
-
-          const books = [...stage.querySelectorAll(".book")];
-          for (const b of books){
-            const natW = parseFloat(b.dataset.nw || "0") || targetW;
-            const ar = parseFloat(b.dataset.ar || "0");
-
-            const maxNativeW = natW * SCALE_NATIVE;
-            const clampedW = Math.min(targetW, maxNativeW);
-
-            b.style.setProperty("--w", clampedW + "px");
-
-            const centerY = computeCenterY(ar, clampedW);
-            b.dataset.centerY = String(centerY);
-
-            const x = parseFloat(b.dataset.x || "0");
-            const y = parseFloat(b.dataset.y || "0");
-            const rot = parseFloat(b.dataset.rot || "0");
-            const scale = parseFloat(b.dataset.scale || "1");
-
-            b.style.transition = "none";
-            setTransform(b, x, y, rot, scale, centerY);
-          }
-        });
-      }
-
-      // init
-      window.addEventListener("keydown", onKeyDown);
-      window.addEventListener("resize", onResize);
-
-      loadCovers()
-        .then(() => onResize())
-        .catch(err => console.error(err));
-    })();
+    });
+  }
+
+  // init
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("resize", onResize);
+
+  loadCovers()
+    .then(() => onResize())
+    .catch(err => console.error(err));
+})();
   </script>
 </body>
 </html>
