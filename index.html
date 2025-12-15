@@ -7,7 +7,7 @@
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="LIBRVRY">
-  <meta property="og:description" content="Be quiet">
+  <meta property="og:description" content="Be still">
   <meta property="og:image" content="https://librvry.com/favicon/social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -80,6 +80,13 @@
     pointer-events: none;
     z-index: 9999;
   }
+
+    #app {
+    height: 100vh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
   </style>
 </head>
 
@@ -99,12 +106,12 @@
   </div>
 
   <script>
-    (() => {
+(() => {
   const stage = document.getElementById("stage");
 
   // ---------- Tunables ----------
   const MAX_ONSCREEN = 14;
-  const MIN_STACK = 6; // <-- NEW: never let the pile drop below this
+  const MIN_STACK = 6; // never let the pile drop below this
 
   // Default autoplay speed (ms). Can be overridden by URL params.
   const DEFAULT_AUTOPLAY_INTERVAL = 700;
@@ -234,7 +241,7 @@
     return outgoing;
   }
 
-  // NEW: ensure the visible pile never runs out
+  // ensure the visible pile never runs out
   function ensureStack(minCount = MIN_STACK){
     if (!covers.length) return;
     let count = stage.querySelectorAll(":scope > .book").length;
@@ -256,7 +263,7 @@
 
     setGlobalWidthVar();
 
-    // seed pile (now uses MIN_STACK)
+    // seed pile
     ensureStack(MIN_STACK);
 
     if (AUTOPLAY) startAutoplay();
@@ -291,7 +298,6 @@
 
     // Keep only recent books in the visible pile (outgoing lives elsewhere)
     while (stage.querySelectorAll(":scope > .book").length > MAX_ONSCREEN) {
-      // remove oldest visible .book
       const first = stage.querySelector(":scope > .book");
       if (first) first.remove();
       else break;
@@ -363,7 +369,7 @@
 
     // Instantly reveal next top, and refill behind it if needed
     refreshInteractivity();
-    ensureStack(MIN_STACK); // <-- NEW: prevents empty screen
+    ensureStack(MIN_STACK);
 
     top.style.transition = "none";
     setTransform(top, currX, currY, rot, scale, centerY);
@@ -391,9 +397,24 @@
       if (now - lastInteractionAt < RESUME_AFTER_MS) return;
 
       addBook({ animateIn: true, dir: 0 });
-      // (Optional) keep stack healthy even if something removes books:
       ensureStack(MIN_STACK);
     }, AUTOPLAY_INTERVAL);
+  }
+
+  // ---------- Next / Prev wrappers (used by keys + scroll) ----------
+  function stackNext(){
+    noteInteraction();
+    userInteracting = true;
+    addBook({ animateIn: true, dir: 1 });
+    ensureStack(MIN_STACK);
+    setTimeout(() => { userInteracting = false; }, 250);
+  }
+
+  function stackPrev(){
+    noteInteraction();
+    userInteracting = true;
+    dismissTop(-1, 260);
+    setTimeout(() => { userInteracting = false; }, 250);
   }
 
   // ---------- Swipe / Drag on top book ----------
@@ -504,12 +525,9 @@
   // ---------- Keyboard navigation ----------
   function onKeyDown(e){
     if (e.key === "ArrowRight") {
-      noteInteraction();
-      addBook({ animateIn: true, dir: 1 });
-      ensureStack(MIN_STACK);
+      stackNext();
     } else if (e.key === "ArrowLeft") {
-      noteInteraction();
-      dismissTop(-1, 260);
+      stackPrev();
     }
   }
 
@@ -551,7 +569,157 @@
   loadCovers()
     .then(() => onResize())
     .catch(err => console.error(err));
+
+  /* ============================
+     Virtual Scroll Nav (Add-on)
+     DOWN => next (add), UP => prev (remove)
+     Works with: wheel (desktop) + touch drag + inertia (mobile)
+  ============================ */
+
+  const ACTIONS = {
+    add: stackNext,
+    remove: stackPrev,
+  };
+
+  const STAGE = stage;
+
+  const VS = {
+    THRESHOLD_PX: 90,
+    COOLDOWN_MS: 140,
+    MAX_STEPS_PER_SEC: 10,
+    INERTIA_DECAY: 0.94,
+    MIN_VELOCITY: 0.15,
+    VELOCITY_GAIN: 0.9,
+  };
+
+  (function installVirtualScrollNav(stageEl) {
+    if (!stageEl) return;
+
+    stageEl.style.overscrollBehavior = "none";
+    stageEl.style.touchAction = "none";
+
+    let intent = 0;
+    let lastFire = 0;
+    let lastStepAt = 0;
+
+    let touchActive = false;
+    let lastY = 0;
+    let lastT = 0;
+    let velocity = 0;
+    let rafId = null;
+
+    const canFire = () => {
+      const now = performance.now();
+      if (now - lastFire < VS.COOLDOWN_MS) return false;
+
+      const minGap = 1000 / VS.MAX_STEPS_PER_SEC;
+      if (now - lastStepAt < minGap) return false;
+
+      return true;
+    };
+
+    const fireStep = (dir) => {
+      if (!canFire()) return;
+      if (dir > 0) ACTIONS.add();
+      else ACTIONS.remove();
+
+      const now = performance.now();
+      lastFire = now;
+      lastStepAt = now;
+    };
+
+    const consumeIntent = () => {
+      while (intent >= VS.THRESHOLD_PX && canFire()) {
+        fireStep(+1);
+        intent -= VS.THRESHOLD_PX;
+      }
+      while (intent <= -VS.THRESHOLD_PX && canFire()) {
+        fireStep(-1);
+        intent += VS.THRESHOLD_PX;
+      }
+    };
+
+    const addDelta = (deltaY) => {
+      // deltaY > 0 means "scroll down" => next/add
+      intent += deltaY;
+      consumeIntent();
+    };
+
+    function stopInertia() {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+
+    function startInertia() {
+      stopInertia();
+      let v = velocity * VS.VELOCITY_GAIN;
+
+      const tick = () => {
+        if (Math.abs(v) < VS.MIN_VELOCITY) {
+          rafId = null;
+          return;
+        }
+        const dt = 16;
+        const delta = v * dt * 10;
+        addDelta(delta);
+
+        v *= VS.INERTIA_DECAY;
+        rafId = requestAnimationFrame(tick);
+      };
+
+      rafId = requestAnimationFrame(tick);
+    }
+
+    // Desktop / trackpad
+    const onWheel = (e) => {
+      e.preventDefault();
+      addDelta(e.deltaY);
+    };
+
+    // Mobile drag => virtual scroll
+    const onTouchStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      touchActive = true;
+      stopInertia();
+      lastY = e.touches[0].clientY;
+      lastT = performance.now();
+      velocity = 0;
+    };
+
+    const onTouchMove = (e) => {
+      if (!touchActive || !e.touches || e.touches.length !== 1) return;
+      e.preventDefault();
+
+      const now = performance.now();
+      const y = e.touches[0].clientY;
+
+      // finger up => dy positive => "scroll down" => next/add
+      const dy = lastY - y;
+      const dt = Math.max(1, now - lastT);
+
+      const v = dy / dt;
+      velocity = velocity * 0.7 + v * 0.3;
+
+      addDelta(dy);
+
+      lastY = y;
+      lastT = now;
+    };
+
+    const onTouchEnd = () => {
+      if (!touchActive) return;
+      touchActive = false;
+      startInertia();
+    };
+
+    stageEl.addEventListener("wheel", onWheel, { passive: false });
+    stageEl.addEventListener("touchstart", onTouchStart, { passive: false });
+    stageEl.addEventListener("touchmove", onTouchMove, { passive: false });
+    stageEl.addEventListener("touchend", onTouchEnd, { passive: false });
+    stageEl.addEventListener("touchcancel", onTouchEnd, { passive: false });
+  })(STAGE);
+
 })();
-  </script>
+</script>
 </body>
 </html>
