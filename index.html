@@ -371,13 +371,19 @@
     refreshInteractivity();
     ensureStack(MIN_STACK);
 
+    // --- Normalize exit origin (Option A) ---
+    const baseX = 0; // snap to visual center
+    const baseY = currY;
+    
     top.style.transition = "none";
-    setTransform(top, currX, currY, rot, scale, centerY);
-
+    setTransform(top, baseX, baseY, rot, scale, centerY);
+    
+    // force layout so Safari/mobile commit the transform
     void top.offsetWidth;
-
-    const targetX = currX + dir * OFFSCREEN;
-    const targetY = currY + (Math.random() * 140 - 70);
+    
+    // --- existing exit logic ---
+    const targetX = baseX + dir * OFFSCREEN;
+    const targetY = baseY + (Math.random() * 140 - 70);
 
     requestAnimationFrame(() => {
       top.style.transition = `transform ${duration}ms cubic-bezier(.2,.9,.2,1)`;
