@@ -19,7 +19,7 @@
       @@@@@@@@                @@@@@@@@@@@@@@@@@@@@               @@@@@@@@@@     
 ```
 # LIBRVRY
-LIBRVRY is a lightweight, client-side web project that turns a folder of book covers into a tactile, swipeable pile. Covers animate into a centered stack, preserve native aspect ratios, never upscale beyond their original size, and support scroll and autoplay interactions. Designed to feel physical rather than UI-like.
+LIBRVRY is a lightweight, client-side web project that turns a folder of book covers into a tactile, scrollable pile. Covers animate into a centered stack, preserve native aspect ratios, never upscale beyond their original size, and support scroll and autoplay interactions. Designed to feel physical rather than UI-like.
 
 LIBRVRY supports a few lightweight URL parameters for controlling autoplay behavior. These are useful for tuning the experience or disabling motion entirely.
 	•	?autoplay=off
