@@ -134,7 +134,7 @@
     const ms = parseInt(raw, 10);
     if (Number.isNaN(ms)) return DEFAULT_AUTOPLAY_INTERVAL;
 
-    return clamp(ms, 120, 5000);
+    return clamp(ms, 50, 5000);
   }
 
   const AUTOPLAY_INTERVAL = getAutoplayInterval();
