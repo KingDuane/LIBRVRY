@@ -7,7 +7,7 @@
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="LIBRVRY">
-  <meta property="og:description" content="Be quiet">
+  <meta property="og:description" content="Be still">
   <meta property="og:image" content="https://librvry.com/favicon/social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -95,7 +95,7 @@
   const MIN_STACK = 6;
 
   // Default autoplay interval (ms)
-  const DEFAULT_AUTOPLAY_INTERVAL = 400;
+  const DEFAULT_AUTOPLAY_INTERVAL = 200;
 
   // Pause autoplay after real user input for this long:
   const RESUME_AFTER_MS = 2200;
@@ -276,7 +276,7 @@
         return;
       }
 
-      book.style.transition = "transform 620ms cubic-bezier(.2,.85,.2,1)";
+      book.style.transition = "transform 420ms cubic-bezier(.2,.85,.2,1)";
       setTransform(book, driftX, driftY, rot, scale, centerY);
     };
 
@@ -298,9 +298,9 @@
 
   // ---------- Virtual Scroll Nav (DOWN adds only) ----------
   const VS = {
-    THRESHOLD_PX: 90,
+    THRESHOLD_PX: 50,
     COOLDOWN_MS: 120,
-    MAX_STEPS_PER_SEC: 12,
+    MAX_STEPS_PER_SEC: 20,
     INERTIA_DECAY: 0.94,
     MIN_VELOCITY: 0.15,
     VELOCITY_GAIN: 0.9,
