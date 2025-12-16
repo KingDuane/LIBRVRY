@@ -105,7 +105,7 @@
   <div id="outgoing"></div>
   </div>
 
-  <script>
+<script>
 (() => {
   const stage = document.getElementById("stage");
 
@@ -227,18 +227,34 @@
     return ar ? (-(widthPx * ar) / 2) : 0;
   }
 
-  function ensureOutgoingLayer(){
-    let outgoing = document.getElementById("outgoing");
-    if (!outgoing) {
-      outgoing = document.createElement("div");
-      outgoing.id = "outgoing";
-      outgoing.style.position = "absolute";
-      outgoing.style.inset = "0";
-      outgoing.style.pointerEvents = "none";
-      outgoing.style.zIndex = "9999";
-      stage.appendChild(outgoing);
+  // Two outgoing layers:
+  // - outgoingBottom sits behind the pile so bottom dismiss doesn't "pop" forward
+  // - outgoingTop sits above the pile for top dismiss (drag / swipe)
+  function ensureOutgoingLayers(){
+    let outgoingTop = document.getElementById("outgoingTop");
+    let outgoingBottom = document.getElementById("outgoingBottom");
+
+    if (!outgoingBottom) {
+      outgoingBottom = document.createElement("div");
+      outgoingBottom.id = "outgoingBottom";
+      outgoingBottom.style.position = "absolute";
+      outgoingBottom.style.inset = "0";
+      outgoingBottom.style.pointerEvents = "none";
+      outgoingBottom.style.zIndex = "0";
+      stage.insertBefore(outgoingBottom, stage.firstChild);
     }
-    return outgoing;
+
+    if (!outgoingTop) {
+      outgoingTop = document.createElement("div");
+      outgoingTop.id = "outgoingTop";
+      outgoingTop.style.position = "absolute";
+      outgoingTop.style.inset = "0";
+      outgoingTop.style.pointerEvents = "none";
+      outgoingTop.style.zIndex = "9999";
+      stage.appendChild(outgoingTop);
+    }
+
+    return { outgoingTop, outgoingBottom };
   }
 
   // ensure the visible pile never runs out
@@ -276,6 +292,7 @@
     const book = document.createElement("div");
     book.className = "book";
     book.dataset.src = src;
+    book.style.zIndex = "1"; // explicit normal pile depth
 
     const rot = baseRotationFor(src, 12) + (Math.random() * 6 - 3);
     const scale = 1;
@@ -344,7 +361,78 @@
     if (img.complete) onLoaded();
   }
 
-  // Non-blocking dismiss: move top to outgoing layer, immediately reveal next top.
+  // Insert a book at the *bottom* of the pile (behind all others)
+  function addBookAtBottom({ animateIn = false, dir = 0 } = {}){
+    const src = nextCover();
+    if (!src) return;
+
+    const book = document.createElement("div");
+    book.className = "book";
+    book.dataset.src = src;
+    book.style.zIndex = "1"; // still part of the normal pile
+
+    const rot = baseRotationFor(src, 12) + (Math.random() * 6 - 3);
+    const scale = 1;
+
+    const driftX = (Math.random() * 18 - 9);
+    const driftY = (Math.random() * 10 - 5);
+
+    book.dataset.rot = String(rot);
+    book.dataset.scale = String(scale);
+    book.dataset.x = String(driftX);
+    book.dataset.y = String(driftY);
+
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "";
+    img.draggable = false;
+
+    book.appendChild(img);
+
+    const firstBook = stage.querySelector(":scope > .book");
+    if (firstBook) stage.insertBefore(book, firstBook);
+    else stage.appendChild(book);
+
+    const entry = randomEntryVector(dir);
+
+    const onLoaded = () => {
+      const natW = img.naturalWidth || 0;
+      const natH = img.naturalHeight || 0;
+      const ar = (natW && natH) ? (natH / natW) : 0;
+
+      book.dataset.nw = String(natW);
+      book.dataset.ar = String(ar);
+
+      const targetW = getTargetWidthPx();
+      const maxNativeW = natW ? (natW * SCALE_NATIVE) : targetW;
+      const clampedW = Math.min(targetW, maxNativeW);
+
+      document.documentElement.style.setProperty("--book-width", targetW + "px");
+      book.style.setProperty("--w", clampedW + "px");
+
+      const centerY = computeCenterY(ar, clampedW);
+      book.dataset.centerY = String(centerY);
+
+      book.style.transition = "none";
+
+      if (!animateIn) {
+        setTransform(book, driftX, driftY, rot, scale, centerY);
+        return;
+      }
+
+      setTransform(book, entry.x + driftX, entry.y + driftY, rot, scale, centerY);
+      void book.offsetWidth;
+
+      book.style.transition = "transform 620ms cubic-bezier(.2,.85,.2,1)";
+      setTransform(book, driftX, driftY, rot, scale, centerY);
+    };
+
+    img.addEventListener("load", onLoaded, { once: true });
+    img.addEventListener("error", () => book.remove(), { once: true });
+    if (img.complete) onLoaded();
+  }
+
+  // Dismiss TOP (used by drag swipe): outgoing above pile.
   function dismissTop(dir = 1, duration = 260){
     const books = stage.querySelectorAll(":scope > .book");
     const top = books[books.length - 1];
@@ -355,33 +443,31 @@
     const centerY = parseFloat(top.dataset.centerY || "0");
     const rot = parseFloat(top.dataset.rot || "0");
     const scale = parseFloat(top.dataset.scale || "1");
-    const currX = parseFloat(top.dataset.x || "0");
     const currY = parseFloat(top.dataset.y || "0");
 
-    const outgoing = ensureOutgoingLayer();
+    const { outgoingTop } = ensureOutgoingLayers();
 
     top.onpointerdown = top.onpointermove = top.onpointerup = top.onpointercancel = null;
     top.classList.remove("dragging");
     top.style.pointerEvents = "none";
     top.style.cursor = "default";
 
-    outgoing.appendChild(top);
+    // keep above pile during exit
+    top.style.zIndex = "9999";
+    outgoingTop.appendChild(top);
 
     // Instantly reveal next top, and refill behind it if needed
     refreshInteractivity();
     ensureStack(MIN_STACK);
 
-    // --- Normalize exit origin (Option A) ---
-    const baseX = 0; // snap to visual center
+    // Normalize exit origin
+    const baseX = 0;
     const baseY = currY;
-    
+
     top.style.transition = "none";
     setTransform(top, baseX, baseY, rot, scale, centerY);
-    
-    // force layout so Safari/mobile commit the transform
     void top.offsetWidth;
-    
-    // --- existing exit logic ---
+
     const targetX = baseX + dir * OFFSCREEN;
     const targetY = baseY + (Math.random() * 140 - 70);
 
@@ -393,6 +479,96 @@
     const cleanup = () => top.remove();
     top.addEventListener("transitionend", cleanup, { once: true });
     setTimeout(cleanup, duration + 180);
+  }
+
+  // Dismiss BOTTOM (used by ArrowLeft / scroll-up): outgoing BEHIND pile.
+  function dismissBottom(dir = -1, duration = 260){
+    const books = stage.querySelectorAll(":scope > .book");
+    const bottom = books[0];
+    if (!bottom) return;
+
+    noteInteraction();
+
+    const centerY = parseFloat(bottom.dataset.centerY || "0");
+    const rot = parseFloat(bottom.dataset.rot || "0");
+    const scale = parseFloat(bottom.dataset.scale || "1");
+
+    // Capture the *actual* on-screen box BEFORE removing/moving anything.
+    const rect = bottom.getBoundingClientRect();
+    const pinnedLeft = rect.left + rect.width / 2;
+    const pinnedTop  = rect.top - centerY;
+
+    // Build a "ghost" clone for animation (Safari-proof)
+    const ghost = bottom.cloneNode(true);
+    ghost.style.zIndex = "0";
+    ghost.style.pointerEvents = "none";
+    ghost.style.cursor = "default";
+    ghost.style.position = "fixed";
+    ghost.style.left = pinnedLeft + "px";
+    ghost.style.top  = pinnedTop + "px";
+    ghost.style.right = "auto";
+    ghost.style.bottom = "auto";
+    ghost.style.margin = "0";
+    ghost.style.willChange = "transform";
+    ghost.style.transition = "none";
+
+    // Preserve per-book width clamp variable, so it matches exactly
+    const w = bottom.style.getPropertyValue("--w");
+    if (w) ghost.style.setProperty("--w", w);
+
+    // Ensure transform origin matches
+    ghost.style.transformOrigin = "50% 90%";
+
+    // Put ghost behind pile: outgoingBottom sits behind books
+    const { outgoingBottom } = ensureOutgoingLayers();
+    outgoingBottom.appendChild(ghost);
+
+    // Remove the real bottom book immediately (no animation on the real node)
+    bottom.remove();
+
+    // Refill bottom immediately (no entrance animation) and keep pile stable
+    addBookAtBottom({ animateIn: false, dir: 0 });
+    refreshInteractivity();
+    ensureStack(MIN_STACK);
+
+    // Start/end transforms (match your transform grammar)
+    const startTransform =
+      `translate3d(-50%, ${centerY}px, 0) rotate(${rot}deg) scale(${scale})`;
+
+    const targetX = dir * OFFSCREEN;
+    const targetY = (Math.random() * 140 - 70);
+
+    const endTransform =
+      `translate3d(-50%, ${centerY}px, 0) translate3d(${targetX}px, ${targetY}px, 0) rotate(${rot}deg) scale(${scale})`;
+
+    // Animate with WAAPI (more reliable in Safari for this kind of "teleport gap")
+    try {
+      ghost.style.transform = startTransform;
+
+      const anim = ghost.animate(
+        [{ transform: startTransform }, { transform: endTransform }],
+        {
+          duration,
+          easing: "cubic-bezier(.2,.9,.2,1)",
+          fill: "forwards"
+        }
+      );
+
+      anim.onfinish = () => ghost.remove();
+      // Fallback cleanup
+      setTimeout(() => ghost.remove(), duration + 300);
+    } catch {
+      // Fallback to CSS transition if WAAPI isn't available for some reason
+      ghost.style.transform = startTransform;
+      ghost.getBoundingClientRect(); // flush
+      requestAnimationFrame(() => {
+        ghost.style.transition = `transform ${duration}ms cubic-bezier(.2,.9,.2,1)`;
+        ghost.style.transform = endTransform;
+      });
+      const cleanup = () => ghost.remove();
+      ghost.addEventListener("transitionend", cleanup, { once: true });
+      setTimeout(cleanup, duration + 300);
+    }
   }
 
   function startAutoplay(){
@@ -419,7 +595,8 @@
   function stackPrev(){
     noteInteraction();
     userInteracting = true;
-    dismissTop(-1, 260);
+    // Mirror "next": exit left, but from the *bottom* of the pile (and behind it)
+    dismissBottom(-1, 260);
     setTimeout(() => { userInteracting = false; }, 250);
   }
 
@@ -520,6 +697,7 @@
         return;
       }
 
+      // Drag dismiss still affects TOP book (natural UX)
       dismissTop(dx > 0 ? 1 : -1, 260);
       setTimeout(() => { userInteracting = false; }, 250);
     };
