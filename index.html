@@ -39,11 +39,17 @@
       color-scheme: light;
       --book-width: 300px;
       --bg: #D2D2D2;
+      /* JS will set --vh to 1% of the true visible viewport height on mobile */
+      --vh: 1vh;
+    }
+
+    html, body{
+      height: 100%;
     }
 
     body{
       margin:0;
-      min-height:100vh;
+      min-height:100dvh;
       background: var(--bg);
       overflow:hidden;
       user-select:none;
@@ -53,7 +59,13 @@
     .stage{
       position: relative;
       width: 100vw;
-      height: 100vh;
+
+      /* Prefer modern dynamic viewport units */
+      height: 100dvh;
+
+      /* Fallback: JS-maintained viewport height */
+      height: calc(var(--vh) * 100);
+
       touch-action: none;
       overscroll-behavior: none;
     }
@@ -119,7 +131,6 @@
     }
 
     @keyframes logoFadeIn { from { opacity:0; } to { opacity:1; } }
-
     @keyframes bookSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
     .book{
@@ -173,11 +184,8 @@
           </clipPath>
         </defs>
         <g clip-path="url(#logo-clip)" class="logo-clip-group">
-          <!-- Book 4 vertical: slides up, then hides instantly when rotation starts -->
           <path class="logo-book-4-vertical" d="M573.29 23.66H441V382H573.29V23.66Z" fill="white" />
-          <!-- Book 4 angled: appears when rotation starts, positioned to match vertical, then rotates -->
           <path class="logo-book-4-angled" d="M563.113 -0.000350202L441 50.8828L578.83 381.655L700.942 330.772L563.113 -0.000350202Z" fill="white" />
-          <!-- Books 3, 2, 1 (in front) -->
           <path class="logo-book-3" d="M425.96 23.66H293.67V382H425.96V23.66Z" fill="white" />
           <path class="logo-book-2" d="M279.12 23.66H146.83V382H279.12V23.66Z" fill="white" />
           <path class="logo-book-1" d="M132.29 23.66H0V382H132.29V23.66Z" fill="white" />
@@ -197,7 +205,6 @@
   const MIN_STACK = 6;
 
   const DEFAULT_AUTOPLAY_INTERVAL = 200; // ms
-
   const RESUME_AFTER_MS = 2200;
 
   const LOGO_ANIMATION_DELAY = 2500;
@@ -222,7 +229,6 @@
   function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
   function getAutoplayInterval(){
-    // numeric ?autoplay=700
     if (autoplayRaw && !Number.isNaN(parseInt(autoplayRaw, 10))) {
       const ms = parseInt(autoplayRaw, 10);
       return clamp(ms, 50, 5000);
@@ -244,6 +250,14 @@
   let lastUserInputAt = performance.now() + LOGO_ANIMATION_DELAY;
   function noteUserInput(){
     lastUserInputAt = performance.now();
+  }
+
+  // ---------- Viewport fix ----------
+  function setViewportUnit(){
+    const h = (window.visualViewport && window.visualViewport.height)
+      ? window.visualViewport.height
+      : window.innerHeight;
+    document.documentElement.style.setProperty("--vh", (h * 0.01) + "px");
   }
 
   // ---------- Helpers ----------
@@ -318,6 +332,7 @@
     if (!Array.isArray(list) || list.length === 0) throw new Error("No covers found.");
     covers = list;
 
+    setViewportUnit();
     setGlobalWidthVar();
 
     setTimeout(() => {
@@ -385,11 +400,6 @@
       setTransform(book, entry.x + driftX, entry.y + driftY, rot, scale, centerY);
       void book.offsetWidth;
 
-      if (!animateIn) {
-        setTransform(book, driftX, driftY, rot, scale, centerY);
-        return;
-      }
-
       const finalX = driftX;
       const finalY = driftY;
 
@@ -423,7 +433,6 @@
 
         setTransform(book, finalX, finalY, rot, scale, centerY);
       } else {
-
         book.style.transition = "transform 300ms cubic-bezier(.2,.85,.2,1)";
         setTransform(book, finalX, finalY, rot, scale, centerY);
       }
@@ -581,10 +590,18 @@
   function onResize(){
     cancelAnimationFrame(resizeRAF);
     resizeRAF = requestAnimationFrame(() => {
+      setViewportUnit();
       setGlobalWidthVar();
     });
   }
   window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+  window.addEventListener("pageshow", onResize);
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", onResize);
+    window.visualViewport.addEventListener("scroll", onResize);
+  }
 
   loadCovers()
     .then(() => onResize())
