@@ -25,6 +25,15 @@
   <meta name="apple-mobile-web-app-title" content="LIBRVRY" />
   <link rel="manifest" href="favicon/site.webmanifest" />
 
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-KQGX2CS3KF"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-KQGX2CS3KF');
+  </script>
+
   <style>
     :root{
       color-scheme: light;
@@ -49,42 +58,135 @@
       overscroll-behavior: none;
     }
 
+    .logo-layer{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      pointer-events:none;
+      z-index:0;
+    }
+
+    .logo-container{
+      width:110px;
+      height:auto;
+      opacity:0;
+      animation: logoFadeIn 0.8s ease-out forwards;
+    }
+
+    body.books-in .logo-container{
+      opacity:0.18;
+      transition: opacity 280ms ease-out;
+    }
+
+    .logo-container svg{
+      width:100%;
+      height:auto;
+      display:block;
+      overflow:visible;
+    }
+
+    .logo-clip-group{
+      animation: removeClip 1ms linear 804ms forwards;
+    }
+    @keyframes removeClip { to { clip-path: none; } }
+
+    .logo-book-1{ animation: bookSlideUp 200ms cubic-bezier(0.25, 0.1, 0.25, 1) 0ms both; }
+    .logo-book-2{ animation: bookSlideUp 200ms cubic-bezier(0.25, 0.1, 0.25, 1) 201ms both; }
+    .logo-book-3{ animation: bookSlideUp 200ms cubic-bezier(0.25, 0.1, 0.25, 1) 402ms both; }
+
+    .logo-book-4-vertical{
+      animation:
+        bookSlideUp 200ms cubic-bezier(0.25, 0.1, 0.25, 1) 603ms both,
+        hideInstant 1ms linear 1004ms both;
+    }
+
+    .logo-book-4-angled{
+      opacity:0;
+      transform-origin: 441px 191px;
+      animation:
+        showInstant 1ms linear 1004ms both,
+        rotateFromVertical 800ms cubic-bezier(0.68, -0.55, 0.27, 1.55) 504ms both;
+    }
+
+    @keyframes hideInstant { to { opacity: 0; } }
+    @keyframes showInstant { to { opacity: 1; } }
+
+    @keyframes rotateFromVertical{
+      from { transform: translateX(32px) rotate(-11.5deg); }
+      to   { transform: translateX(0) rotate(0deg); }
+    }
+
+    @keyframes logoFadeIn { from { opacity:0; } to { opacity:1; } }
+
+    @keyframes bookSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
     .book{
       position:absolute;
-      left: 50%;
-      top: 50%;
-      transform-origin: 50% 90%;
-      border-radius: 0;
-      overflow: visible;
-      background: #FFFFFF;
-      box-shadow: 0 14px 40px rgba(0,0,0,0.18);
-      will-change: transform;
-      pointer-events: none; /* add-only */
+      left:50%;
+      top:50%;
+      transform-origin:50% 90%;
+      border-radius:0;
+      overflow:visible;
+      background:#FFFFFF;
+      box-shadow:0 14px 40px rgba(0,0,0,0.18);
+      will-change:transform;
+      pointer-events:none;
+      z-index:1;
     }
 
     .book img{
       width: var(--w, var(--book-width));
-      max-width: 100%;
-      height: auto;
+      max-width:100%;
+      height:auto;
       display:block;
       pointer-events:none;
       -webkit-user-drag:none;
       user-drag:none;
     }
+
+    @media (min-width: 768px){
+      .logo-container{ width:147px; }
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      .logo-container,
+      .logo-clip-group,
+      .logo-book-1, .logo-book-2, .logo-book-3,
+      .logo-book-4-vertical, .logo-book-4-angled{
+        animation: none !important;
+      }
+      .book{ transition: none !important; }
+    }
   </style>
 </head>
 
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-KQGX2CS3KF"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-KQGX2CS3KF');
-</script>
-
 <body>
-  <div class="stage" id="stage"></div>
+
+  <div class="logo-layer">
+    <div class="logo-container">
+      <svg viewBox="0 0 701 382" fill="none" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <clipPath id="logo-clip">
+            <rect x="0" y="0" width="701" height="382" />
+          </clipPath>
+        </defs>
+        <g clip-path="url(#logo-clip)" class="logo-clip-group">
+          <!-- Book 4 vertical: slides up, then hides instantly when rotation starts -->
+          <path class="logo-book-4-vertical" d="M573.29 23.66H441V382H573.29V23.66Z" fill="white" />
+          <!-- Book 4 angled: appears when rotation starts, positioned to match vertical, then rotates -->
+          <path class="logo-book-4-angled" d="M563.113 -0.000350202L441 50.8828L578.83 381.655L700.942 330.772L563.113 -0.000350202Z" fill="white" />
+          <!-- Books 3, 2, 1 (in front) -->
+          <path class="logo-book-3" d="M425.96 23.66H293.67V382H425.96V23.66Z" fill="white" />
+          <path class="logo-book-2" d="M279.12 23.66H146.83V382H279.12V23.66Z" fill="white" />
+          <path class="logo-book-1" d="M132.29 23.66H0V382H132.29V23.66Z" fill="white" />
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="stage" id="stage" aria-label="Book cover stack animation"></div>
 
   <script>
 (() => {
@@ -94,47 +196,38 @@
   const MAX_ONSCREEN = 14;
   const MIN_STACK = 6;
 
-  // Default autoplay interval (ms)
-  const DEFAULT_AUTOPLAY_INTERVAL = 200;
+  const DEFAULT_AUTOPLAY_INTERVAL = 200; // ms
 
-  // Pause autoplay after real user input for this long:
   const RESUME_AFTER_MS = 2200;
+
+  const LOGO_ANIMATION_DELAY = 2500;
+
+  const INTRO_STREAM_INTERVAL = 90;    // ms
+  const INTRO_STREAM_DURATION = 1200;  // ms
 
   const OFFSCREEN = 1100;
 
   const MIN_W = 190;
   const MAX_W = 420;
 
-  // Never upscale: clamp each image to 75% of its native pixel width
   const SCALE_NATIVE = 0.75;
 
   // ---------- URL params ----------
   const params = new URLSearchParams(location.search);
 
-  // autoplay on/off
   const autoplayRaw = (params.get("autoplay") || "").trim().toLowerCase();
   const AUTOPLAY =
     !(autoplayRaw === "0" || autoplayRaw === "false" || autoplayRaw === "off" || autoplayRaw === "no");
 
   function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-  // autoplay speed override
-  // ?speed=700 or ?autoplay=700
   function getAutoplayInterval(){
-    const speedRaw = (params.get("speed") || "").trim();
-    let raw = speedRaw;
-
-    // If no ?speed, allow numeric ?autoplay
-    if (!raw && autoplayRaw && !Number.isNaN(parseInt(autoplayRaw, 10))) {
-      raw = autoplayRaw;
+    // numeric ?autoplay=700
+    if (autoplayRaw && !Number.isNaN(parseInt(autoplayRaw, 10))) {
+      const ms = parseInt(autoplayRaw, 10);
+      return clamp(ms, 50, 5000);
     }
-
-    if (!raw) return DEFAULT_AUTOPLAY_INTERVAL;
-
-    const ms = parseInt(raw, 10);
-    if (Number.isNaN(ms)) return DEFAULT_AUTOPLAY_INTERVAL;
-
-    return clamp(ms, 50, 5000);
+    return DEFAULT_AUTOPLAY_INTERVAL;
   }
 
   const AUTOPLAY_INTERVAL = getAutoplayInterval();
@@ -142,10 +235,13 @@
   // ---------- State ----------
   let covers = [];
   let idx = 0;
-  let autoplayTimer = null;
 
-  // IMPORTANT: this tracks ONLY real user input (not autoplay adds)
-  let lastUserInputAt = performance.now();
+  let autoplayTimer = null;
+  let autoplayRampTimer = null;
+
+  let booksReady = false;
+
+  let lastUserInputAt = performance.now() + LOGO_ANIMATION_DELAY;
   function noteUserInput(){
     lastUserInputAt = performance.now();
   }
@@ -165,7 +261,6 @@
     return (u * 2 - 1) * maxDeg;
   }
 
-  // dir=0 => all angles (autoplay vibe)
   function randomEntryVector(dir = 0){
     if (dir === -1) return { x: -OFFSCREEN, y: (Math.random() * 600 - 300) };
     if (dir ===  1) return { x:  OFFSCREEN, y: (Math.random() * 600 - 300) };
@@ -201,11 +296,17 @@
   }
 
   function ensureStack(minCount = MIN_STACK){
-    if (!covers.length) return;
+    if (!covers.length || !booksReady) return;
     let count = stage.querySelectorAll(":scope > .book").length;
     while (count < minCount) {
-      addBook({ animateIn: false, dir: 0 });
+      addBook({ animateIn: true, dir: 0, intro: false, delay: 0 });
       count++;
+    }
+  }
+
+  function introStack(n = MIN_STACK){
+    for (let i = 0; i < n; i++){
+      addBook({ animateIn: true, dir: 0, intro: true, delay: i * 50 });
     }
   }
 
@@ -218,12 +319,26 @@
     covers = list;
 
     setGlobalWidthVar();
-    ensureStack(MIN_STACK);
 
-    if (AUTOPLAY) startAutoplay();
+    setTimeout(() => {
+      booksReady = true;
+      document.body.classList.add("books-in");
+
+      lastUserInputAt = performance.now() - RESUME_AFTER_MS - 1;
+
+      introStack(MIN_STACK);
+
+      if (AUTOPLAY) {
+        startAutoplay(INTRO_STREAM_INTERVAL);
+        clearTimeout(autoplayRampTimer);
+        autoplayRampTimer = setTimeout(() => startAutoplay(AUTOPLAY_INTERVAL), INTRO_STREAM_DURATION);
+      }
+    }, LOGO_ANIMATION_DELAY);
   }
 
-  function addBook({ animateIn = true, dir = 0 } = {}){
+  function addBook({ animateIn = true, dir = 0, intro = false, delay = 0 } = {}){
+    if (!booksReady) return;
+
     const src = nextCover();
     if (!src) return;
 
@@ -244,7 +359,6 @@
     book.appendChild(img);
     stage.appendChild(book);
 
-    // Cap DOM size (remove oldest behind)
     while (stage.querySelectorAll(":scope > .book").length > MAX_ONSCREEN) {
       const first = stage.querySelector(":scope > .book");
       if (first) first.remove();
@@ -276,25 +390,68 @@
         return;
       }
 
-      book.style.transition = "transform 300ms cubic-bezier(.2,.85,.2,1)";
-      setTransform(book, driftX, driftY, rot, scale, centerY);
+      const finalX = driftX;
+      const finalY = driftY;
+
+      const landX = finalX + (Math.random() * 10 - 5);
+      const landY = finalY + (Math.random() * 8 + 10);
+      const landRot = rot + (Math.random() * 6 - 3);
+
+      if (book.animate) {
+        const start = randomEntryVector(dir);
+        const startBoost = intro ? 1.25 : 1.0;
+
+        const fromX = (start.x + driftX) * startBoost;
+        const fromY = (start.y + driftY) * startBoost;
+
+        book.style.transition = "none";
+        setTransform(book, fromX, fromY, rot, scale, centerY);
+
+        book.animate(
+          [
+            { transform: `translate(-50%, ${centerY}px) translate(${fromX}px, ${fromY}px) rotate(${rot}deg) scale(${scale})` },
+            { transform: `translate(-50%, ${centerY}px) translate(${landX}px, ${landY}px) rotate(${landRot}deg) scale(${scale})`, offset: 0.78 },
+            { transform: `translate(-50%, ${centerY}px) translate(${finalX}px, ${finalY}px) rotate(${rot}deg) scale(${scale})` }
+          ],
+          {
+            duration: intro ? 720 : 380,
+            delay,
+            easing: intro ? "cubic-bezier(.12,.86,.18,1)" : "cubic-bezier(.2,.85,.2,1)",
+            fill: "both"
+          }
+        );
+
+        setTransform(book, finalX, finalY, rot, scale, centerY);
+      } else {
+
+        book.style.transition = "transform 300ms cubic-bezier(.2,.85,.2,1)";
+        setTransform(book, finalX, finalY, rot, scale, centerY);
+      }
     };
 
     img.addEventListener("load", onLoaded, { once: true });
     img.addEventListener("error", () => book.remove(), { once: true });
     if (img.complete) onLoaded();
 
-    ensureStack(MIN_STACK);
+    if (!intro) ensureStack(MIN_STACK);
   }
 
-  function startAutoplay(){
+  function startAutoplay(interval = AUTOPLAY_INTERVAL){
     clearInterval(autoplayTimer);
     autoplayTimer = setInterval(() => {
       const now = performance.now();
       if (now - lastUserInputAt < RESUME_AFTER_MS) return;
-      addBook({ animateIn: true, dir: 0 });
-    }, AUTOPLAY_INTERVAL);
+      addBook({ animateIn: true, dir: 0, intro: false, delay: 0 });
+    }, interval);
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearInterval(autoplayTimer);
+      return;
+    }
+    if (AUTOPLAY && booksReady) startAutoplay(AUTOPLAY_INTERVAL);
+  });
 
   // ---------- Virtual Scroll Nav (DOWN adds only) ----------
   const VS = {
@@ -318,6 +475,7 @@
     let rafId = null;
 
     const canFire = () => {
+      if (!booksReady) return false;
       const now = performance.now();
       if (now - lastFire < VS.COOLDOWN_MS) return false;
       const minGap = 1000 / VS.MAX_STEPS_PER_SEC;
@@ -327,7 +485,7 @@
 
     const fireAdd = () => {
       if (!canFire()) return;
-      addBook({ animateIn: true, dir: 0 });
+      addBook({ animateIn: true, dir: 0, intro: false, delay: 0 });
       const now = performance.now();
       lastFire = now;
       lastStepAt = now;
@@ -393,7 +551,6 @@
       const now = performance.now();
       const y = e.touches[0].clientY;
 
-      // finger up => dy positive => add
       const dy = lastY - y;
       const dt = Math.max(1, now - lastT);
 
@@ -425,7 +582,6 @@
     cancelAnimationFrame(resizeRAF);
     resizeRAF = requestAnimationFrame(() => {
       setGlobalWidthVar();
-      // (We only update --book-width; per-book --w is set on load, leaving transforms stable.)
     });
   }
   window.addEventListener("resize", onResize);
