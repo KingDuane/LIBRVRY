@@ -43,4 +43,4 @@ When a numeric value is provided, autoplay sets the interval (in milliseconds) b
 `/?autoplay=700`<br/>
 `/?autoplay=300`
 
-Scroll or swipe down always adds books manually, regardless of autoplay state.
+Scroll or swipe down adds books manually. Scroll or swipe up peels books off the stack with a fly-away animation and rewinds the cover sequence so scrolling back down replays them in order.

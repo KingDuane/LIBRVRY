@@ -25,6 +25,9 @@
   <meta name="apple-mobile-web-app-title" content="LIBRVRY" />
   <link rel="manifest" href="favicon/site.webmanifest" />
 
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+  <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-KQGX2CS3KF"></script>
   <script>
@@ -141,7 +144,13 @@
       border-radius:0;
       overflow:visible;
       background:#FFFFFF;
-      box-shadow:0 14px 40px rgba(0,0,0,0.18);
+      box-shadow:
+        0 0.5px 1px rgba(0,0,0,0.08),
+        0 1px 2px rgba(0,0,0,0.06),
+        0 2px 4px rgba(0,0,0,0.06),
+        0 4px 8px rgba(0,0,0,0.06),
+        0 8px 16px rgba(0,0,0,0.06),
+        0 16px 32px rgba(0,0,0,0.06);
       will-change:transform;
       pointer-events:none;
       z-index:1;
@@ -241,6 +250,7 @@
   // ---------- State ----------
   let covers = [];
   let idx = 0;
+  let bookCount = 0;
 
   let autoplayTimer = null;
   let autoplayRampTimer = null;
@@ -293,10 +303,26 @@
     return w;
   }
 
+  // ---------- Preloading ----------
+  const PRELOAD_AHEAD = 4;
+  const preloadCache = new Set();
+
+  function preloadAhead(){
+    for (let i = 0; i < PRELOAD_AHEAD; i++){
+      const src = covers[(idx + i) % covers.length];
+      if (!preloadCache.has(src)){
+        preloadCache.add(src);
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }
+
   function nextCover(){
     if (covers.length === 0) return null;
     const src = covers[idx % covers.length];
     idx++;
+    preloadAhead();
     return src;
   }
 
@@ -311,10 +337,8 @@
 
   function ensureStack(minCount = MIN_STACK){
     if (!covers.length || !booksReady) return;
-    let count = stage.querySelectorAll(":scope > .book").length;
-    while (count < minCount) {
+    while (bookCount < minCount) {
       addBook({ animateIn: true, dir: 0, intro: false, delay: 0 });
-      count++;
     }
   }
 
@@ -341,6 +365,7 @@
 
       lastUserInputAt = performance.now() - RESUME_AFTER_MS - 1;
 
+      preloadAhead();
       introStack(MIN_STACK);
 
       if (AUTOPLAY) {
@@ -373,10 +398,11 @@
 
     book.appendChild(img);
     stage.appendChild(book);
+    bookCount++;
 
-    while (stage.querySelectorAll(":scope > .book").length > MAX_ONSCREEN) {
+    while (bookCount > MAX_ONSCREEN) {
       const first = stage.querySelector(":scope > .book");
-      if (first) first.remove();
+      if (first) { first.remove(); bookCount--; }
       else break;
     }
 
@@ -439,7 +465,7 @@
     };
 
     img.addEventListener("load", onLoaded, { once: true });
-    img.addEventListener("error", () => book.remove(), { once: true });
+    img.addEventListener("error", () => { book.remove(); bookCount--; }, { once: true });
     if (img.complete) onLoaded();
 
     if (!intro) ensureStack(MIN_STACK);
@@ -462,7 +488,44 @@
     if (AUTOPLAY && booksReady) startAutoplay(AUTOPLAY_INTERVAL);
   });
 
-  // ---------- Virtual Scroll Nav (DOWN adds only) ----------
+  // ---------- Remove Book (reverse scroll) ----------
+  function removeBook(){
+    if (bookCount <= 1) return;
+    const books = stage.querySelectorAll(":scope > .book");
+    if (books.length === 0) return;
+
+    const top = books[books.length - 1];
+    const exit = randomEntryVector(0);
+
+    // Cancel the fill:both entry animation so the inline style takes effect
+    top.getAnimations().forEach(a => a.cancel());
+
+    // Read the authored transform — matches the structure of our keyframes
+    const from = top.style.transform;
+
+    // Parse the current centerY from the transform to keep the lift consistent
+    const cyMatch = from.match(/translate\(-50%,\s*([-\d.]+)px\)/);
+    const cy = cyMatch ? parseFloat(cyMatch[1]) : 0;
+
+    // Mirror the 3-keyframe entry: settle → lift off stack → fly away
+    const liftY = cy - 15;
+    const anim = top.animate(
+      [
+        { transform: from, opacity: 1 },
+        { transform: from.replace(
+            /translate\(-50%,\s*[-\d.]+px\)/,
+            `translate(-50%, ${liftY}px)`
+          ), opacity: 1, offset: 0.25 },
+        { transform: `translate(-50%, ${cy}px) translate(${exit.x}px, ${exit.y}px) rotate(0deg) scale(0.9)`, opacity: 0 }
+      ],
+      { duration: 500, easing: "cubic-bezier(.2,.85,.2,1)", fill: "forwards" }
+    );
+    anim.onfinish = () => { top.remove(); bookCount--; };
+
+    idx = ((idx - 2) % covers.length + covers.length) % covers.length;
+  }
+
+  // ---------- Virtual Scroll Nav ----------
   const VS = {
     THRESHOLD_PX: 20,
     COOLDOWN_MS: 120,
@@ -472,9 +535,11 @@
     VELOCITY_GAIN: 0.9,
   };
 
-  (function installVirtualScrollAdd(stageEl){
-    let intent = 0;
-    let lastFire = 0;
+  (function installVirtualScroll(stageEl){
+    let addIntent = 0;
+    let removeIntent = 0;
+    let lastAddFire = 0;
+    let lastRemoveFire = 0;
     let lastStepAt = 0;
 
     let touchActive = false;
@@ -483,34 +548,67 @@
     let velocity = 0;
     let rafId = null;
 
-    const canFire = () => {
+    const canFireAdd = () => {
       if (!booksReady) return false;
       const now = performance.now();
-      if (now - lastFire < VS.COOLDOWN_MS) return false;
+      if (now - lastAddFire < VS.COOLDOWN_MS) return false;
+      const minGap = 1000 / VS.MAX_STEPS_PER_SEC;
+      if (now - lastStepAt < minGap) return false;
+      return true;
+    };
+
+    const canFireRemove = () => {
+      if (!booksReady) return false;
+      if (bookCount <= 1) return false;
+      const now = performance.now();
+      if (now - lastRemoveFire < VS.COOLDOWN_MS) return false;
       const minGap = 1000 / VS.MAX_STEPS_PER_SEC;
       if (now - lastStepAt < minGap) return false;
       return true;
     };
 
     const fireAdd = () => {
-      if (!canFire()) return;
+      if (!canFireAdd()) return;
       addBook({ animateIn: true, dir: 0, intro: false, delay: 0 });
       const now = performance.now();
-      lastFire = now;
+      lastAddFire = now;
       lastStepAt = now;
     };
 
-    const consumeIntent = () => {
-      while (intent >= VS.THRESHOLD_PX && canFire()) {
+    const fireRemove = () => {
+      if (!canFireRemove()) return;
+      removeBook();
+      const now = performance.now();
+      lastRemoveFire = now;
+      lastStepAt = now;
+    };
+
+    const consumeAddIntent = () => {
+      while (addIntent >= VS.THRESHOLD_PX && canFireAdd()) {
         fireAdd();
-        intent -= VS.THRESHOLD_PX;
+        addIntent -= VS.THRESHOLD_PX;
       }
-      if (intent < 0) intent *= 0.5;
+      if (addIntent < 0) addIntent *= 0.5;
+    };
+
+    const consumeRemoveIntent = () => {
+      while (removeIntent >= VS.THRESHOLD_PX && canFireRemove()) {
+        fireRemove();
+        removeIntent -= VS.THRESHOLD_PX;
+      }
+      if (removeIntent < 0) removeIntent *= 0.5;
     };
 
     const addDelta = (deltaY) => {
-      intent += deltaY;
-      consumeIntent();
+      addIntent += deltaY;
+      removeIntent = 0;
+      consumeAddIntent();
+    };
+
+    const removeDelta = (deltaY) => {
+      removeIntent += deltaY;
+      addIntent = 0;
+      consumeRemoveIntent();
     };
 
     function stopInertia(){
@@ -525,8 +623,9 @@
       const tick = () => {
         if (Math.abs(v) < VS.MIN_VELOCITY) { rafId = null; return; }
         const dt = 16;
-        const delta = v * dt * 10;
-        if (delta > 0) addDelta(delta);
+        const delta = Math.abs(v * dt * 10);
+        if (v > 0) addDelta(delta);
+        else removeDelta(delta);
         v *= VS.INERTIA_DECAY;
         rafId = requestAnimationFrame(tick);
       };
@@ -536,9 +635,11 @@
 
     const onWheel = (e) => {
       e.preventDefault();
+      noteUserInput();
       if (e.deltaY > 0) {
-        noteUserInput();
         addDelta(e.deltaY);
+      } else if (e.deltaY < 0) {
+        removeDelta(Math.abs(e.deltaY));
       }
     };
 
@@ -567,6 +668,7 @@
       velocity = velocity * 0.7 + v * 0.3;
 
       if (dy > 0) addDelta(dy);
+      else if (dy < 0) removeDelta(Math.abs(dy));
 
       lastY = y;
       lastT = now;
