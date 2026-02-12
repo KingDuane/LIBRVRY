@@ -491,10 +491,13 @@
   // ---------- Remove Book (reverse scroll) ----------
   function removeBook(){
     if (bookCount <= 1) return;
-    const books = stage.querySelectorAll(":scope > .book");
-    if (books.length === 0) return;
+    const books = stage.querySelectorAll(":scope > .book:not([data-removing])");
+    if (books.length <= 1) return;
 
     const top = books[books.length - 1];
+    top.dataset.removing = "";
+    bookCount--;
+
     const exit = randomEntryVector(0);
 
     // Cancel the fill:both entry animation so the inline style takes effect
@@ -518,9 +521,9 @@
           ), opacity: 1, offset: 0.25 },
         { transform: `translate(-50%, ${cy}px) translate(${exit.x}px, ${exit.y}px) rotate(0deg) scale(0.9)`, opacity: 0 }
       ],
-      { duration: 500, easing: "cubic-bezier(.2,.85,.2,1)", fill: "forwards" }
+      { duration: 680, easing: "cubic-bezier(.2,.85,.2,1)", fill: "forwards" }
     );
-    anim.onfinish = () => { top.remove(); bookCount--; };
+    anim.onfinish = () => top.remove();
 
     idx = ((idx - 2) % covers.length + covers.length) % covers.length;
   }
